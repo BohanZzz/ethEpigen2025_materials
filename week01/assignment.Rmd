@@ -1,0 +1,20 @@
+---
+title: "Assignment Week01"
+author: "Bohan Zhang"
+date: "2025-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Firstly we load the epiwraps library:
+```{r}
+library(epiwraps)
+```
+
+Now we print the session info:
+```{r}
+sessionInfo()
+```
