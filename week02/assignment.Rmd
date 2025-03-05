@@ -1,0 +1,86 @@
+---
+title: "Assignment_Week02"
+author: "Bohan Zhang"
+date: "2025-02-28"
+output: html_document
+---
+
+```{r warning = FALSE}
+suppressPackageStartupMessages({   #suppress to have a cleaner Rmarkdown
+  library(AnnotationHub) # to fetch genomes, annotations, etc.
+  library(ensembldb)     # to manipulate ensembl gene annotations
+  library(GenomicRanges) # data structure for genomic ranges 
+  library(epiwraps)      # visualization
+  library(ggplot2)
+})
+```
+
+## Using AnnotationHub:
+
+### 1. Mouse EnsDb object, version 102, genome build GRCm38:
+
+```{r}
+ah <- AnnotationHub()
+query_result <- query(ah, c("Mus Musculus", "EnsDb", "102", "GRCm38"))
+query_result
+
+```
+
+From the query result we can see the id we want is "AH89211".
+
+```{r}
+ensdb <- ah[["AH89211"]]
+ensdb
+```
+
+### 2. The mouse genome sequence (dna_sm) in TwoBit/2bit format for GRCm38
+
+```{r}
+query_result_2 <- query(ah, c("Ensembl", "GRCm38", "dna_sm", "2bit"))
+query_result_2
+```
+
+We can see that we got 19 results. we can download the newest version (ID: "AH88477").
+
+```{r}
+dna_sm_2bit <- ah[["AH88477"]]
+dna_sm_2bit
+```
+
+### 3. The drosophila melanogaster genome sequence (dna_sm) in TwoBit/2bit format for BDGP6
+
+```{r}
+query_result_3 <- query(ah, c("Drosophila_melanogaster", "Ensembl", "BDGP6", "dna_sm", "2bit"))
+query_result_3
+```
+
+We can see that there are 24 results met our requirement. We can download the newest version ("AH106160"):
+
+```{r}
+Fly<-ah[["AH106160"]]
+Fly
+```
+
+## Using the mouse EnsDb to answer the questions:
+
+### 1. How many different ensembl gene IDs and gene symbols are there for protein-coding genes?
+
+```{r}
+genes <- genes(ensdb)
+protein_coding_genes <- genes[which(genes$gene_biotype=="protein_coding")]
+cat("Different Ensembl gene ID: ", length(unique(protein_coding_genes$gene_id))) #Ensembl gene IDs
+cat("\nDifferent Symbols: ", length(unique(protein_coding_genes$gene_name)))  #gene symbol
+```
+
+### 2. Plot the distribution of the (spliced) length of protein-coding transcripts
+
+```{r}
+Transcripts <- exonsBy(ensdb, by = "tx", filter = TxBiotypeFilter("protein_coding"))
+TX_lengths <- sum(width(Transcripts)) #calculate the length of each transcripts
+ggplot(data.frame(length = TX_lengths), aes(x = length)) +
+  geom_histogram(binwidth = 100, fill = "steelblue", color = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of Spliced Length of Protein-Coding Transcripts",
+       x = "Transcript Length (bp)",
+       y = "Frequency") +
+  theme_minimal()
+```
