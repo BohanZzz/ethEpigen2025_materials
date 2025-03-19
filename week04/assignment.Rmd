@@ -1,0 +1,71 @@
+---
+title: "Assignment Week 04"
+author: "Bohan Zhang"
+date: "2025-03-14"
+output: html_document
+---
+
+```{r setup, message=FALSE}
+library(rtracklayer)
+library(GenomicRanges)
+setwd("/mnt/gapp/work/bohan/bioinfo/Week04/")
+```
+
+## File download
+
+Firstly, we download the peaks files from ENCODE:
+
+```{r}
+
+download.file("https://www.encodeproject.org/files/ENCFF460EOA/@@download/ENCFF460EOA.bed.gz", 
+              "p300_peaks.bed.gz")
+download.file("https://www.encodeproject.org/files/ENCFF247GVM/@@download/ENCFF247GVM.bed.gz", 
+              "H3K4me3_peaks.bed.gz")
+download.file("https://www.encodeproject.org/files/ENCFF824AFZ/@@download/ENCFF824AFZ.bed.gz",
+              "H3K4me1_peaks.bed.gz")
+download.file("https://www.encodeproject.org/files/ENCFF360VIS/@@download/ENCFF360VIS.bed.gz", 
+              "H3K27ac_peaks.bed.gz")
+download.file("https://www.encodeproject.org/files/ENCFF105NKG/@@download/ENCFF105NKG.bed.gz", 
+              "H3K27me3_peaks.bed.gz")
+
+```
+
+## Check the overlap between p300 and each marks
+
+Firstly we read the file:
+
+```{r}
+readLines("p300_peaks.bed.gz", n = 5)
+```
+
+found that the structure of this file is actually .narrowPeak format, rather than .bed format. so we use "format = narrowPeak" to read them:
+
+```{r}
+p300 <- rtracklayer::import("p300_peaks.bed.gz", format = "narrowPeak")
+H3K4me3 <- import("H3K4me3_peaks.bed.gz", format = "narrowPeak")
+H3K4me1 <- import("H3K4me1_peaks.bed.gz", format = "narrowPeak")
+H3K27ac <- import("H3K27ac_peaks.bed.gz", format = "narrowPeak")
+H3K27me3 <- import("H3K27me3_peaks.bed.gz", format = "narrowPeak")
+head(p300)
+head(H3K4me3)
+```
+
+Then we can calculate the proportion of the overlap:
+
+```{r}
+Proportion <- function(peaks, gene){    #peaks: the marks,  gene: p300
+  overlaps <- findOverlaps(peaks, gene, type = "any")    #here I chose "any" because I want to see all regions in p300 that have overlaps with those marks (even not the whole mark)
+  num_overlapping <- length(unique(subjectHits(overlaps)))   #the number of peaks in p300 that have overlap.
+  proportion <- num_overlapping / length(gene)
+  return(proportion)
+}
+proportion_H3K4me3 <- Proportion(H3K4me3, p300)
+proportion_H3K4me1 <- Proportion(H3K4me1, p300)
+proportion_H3K27ac <- Proportion(H3K27ac, p300)
+proportion_H3K27me3 <- Proportion(H3K27me3, p300)
+
+cat("proportion of p300 peaks overlap with H3K4me3: ", proportion_H3K4me3, 
+    "\nproportion of p300 peaks overlap with H3K4me1: ", proportion_H3K4me1, 
+    "\nproportion of p300 peaks overlap with H3K27ac: ", proportion_H3K27ac, 
+    "\nproportion of p300 peaks overlap with H3K27me3: ", proportion_H3K27me3)
+```
