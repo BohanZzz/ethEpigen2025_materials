@@ -1,0 +1,81 @@
+---
+title: "Assignment Week 05"
+author: "Bohan Zhang"
+date: "2025-03-24"
+output: html_document
+---
+
+Here we use the H3K4me3 and H3K27me3 peaks from mouse embryonic stem cells (ESC).
+
+```{r setup, include=FALSE}
+library(rtracklayer)
+library(GenomicRanges)
+setwd("/mnt/gapp/work/bohan/bioinfo/Week05/")
+```
+
+## Get the data from last week
+
+```{r}
+H3K4me3 <- import("/mnt/gapp/work/bohan/bioinfo/Week04/H3K4me3_peaks.bed.gz", format = "narrowPeak")
+H3K27me3 <- import("/mnt/gapp/work/bohan/bioinfo/Week04/H3K27me3_peaks.bed.gz", format = "narrowPeak")
+head(H3K4me3)
+```
+
+## Identify bivalent domains
+
+Here the "bivalent domains" means regions that have both H3K4me3 and H3K27me3 mark.
+
+```{r}
+bivalent <- findOverlaps(H3K4me3, H3K27me3, type = "any")
+bivalent_domains <- pintersect(H3K4me3[from(bivalent)],
+                              H3K27me3[to(bivalent)])
+bivalent_domains
+```
+
+Here we identified 4191 bivalent domains.
+
+## Upon differentiation
+
+### Download files for differentiation cells
+
+Here we choose B cells as differentiated cell type.
+
+```{r}
+download.file("https://www.encodeproject.org/files/ENCFF496DOC/@@download/ENCFF496DOC.bed.gz", 
+              "H3K4me3_Bcell.bed.gz")
+download.file("https://www.encodeproject.org/files/ENCFF931RRP/@@download/ENCFF931RRP.bed.gz", 
+              "H3K27me3_Bcell.bed.gz")
+H3K4me3_Bcell <- import("H3K4me3_Bcell.bed.gz", format = "narrowPeak")
+H3K27me3_Bcell <- import("H3K27me3_Bcell.bed.gz", format = "narrowPeak")
+```
+### Investigate the overlaps
+
+Now we investigate how many of the ESC bivalent domains are overlapping either mark or their combination in B cells:
+
+```{r}
+# Only overlap with H3K4me3:
+H3K4me3_single_mark_overlap <- findOverlaps(bivalent_domains, H3K4me3_Bcell, type = "any")
+length(H3K4me3_single_mark_overlap)
+
+#Only overlap with H3K27me3:
+H3K27me3_single_mark_overlap <- findOverlaps(bivalent_domains, H3K27me3_Bcell, type = "any")
+length(H3K27me3_single_mark_overlap)
+
+#Overlap with both marks:
+com <- findOverlaps(H3K4me3_Bcell, H3K27me3_Bcell, type = "any")
+com_domains <- pintersect(H3K4me3_Bcell[from(com)],
+                          H3K27me3_Bcell[to(com)])
+head(com_domains)
+overlap_combination <- findOverlaps(bivalent_domains, com_domains, type = "any")
+length(overlap_combination)
+```
+
+### Final report
+
+```{r}
+cat("number of ESC bivalent domains overlaping with H3K4me3: ", length(H3K4me3_single_mark_overlap),
+    "\nnumber of ESC bivalent domains overlaping with H3K27me3: ", length(H3K27me3_single_mark_overlap),
+    "\nnumber of ESC bivalent domains overlaping with the combination of the two marks: ",  length(overlap_combination))
+```
+
+
