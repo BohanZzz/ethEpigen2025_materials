@@ -1,0 +1,78 @@
+---
+title: "Assignment Week 06"
+author: "Bohan Zhang"
+date: "2025-03-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(GenomicRanges)
+  library(ggplot2)
+  library(memes) # for the meme-based methods -- COMMENT OUT when using alternatives
+  library(motifmatchr) # for scanning sequences for matches of given motifs
+  library(Biostrings) # for handling sequences
+  library(MotifDb) # database of motifs, but it's not up-to-date. lately we start to use others
+  library(TFBSTools) # for handling some motif formats
+  library(universalmotif) # for converting motifs to various formats
+  library(PWMEnrich) # for R-based motif enrichment analysis
+})
+setwd("/mnt/gapp/work/bohan/bioinfo/Week06")
+```
+
+## Data Preparation
+
+Here I choose REST in mouse myocyte to do the analysis. And the reference genome is mm10.
+
+```{r}
+download.file("https://www.encodeproject.org/files/ENCFF368VWJ/@@download/ENCFF368VWJ.bed.gz", "mmu_myocyte_REST.bed.gz")
+peaks <- rtracklayer::import("mmu_myocyte_REST.bed.gz", format="NarrowPeak")
+seqlevelsStyle(peaks) <- "Ensembl"
+```
+
+## Identify the instances of the factor’s motif
+
+### Scanning only the peaks area using motifmatchr
+
+```{r}
+ah <- AnnotationHub()
+AnnotationHub::query(ah, c("mm10", "2bit"))
+# here we found the reference genome is AH14005
+genome <- ah[["AH14005"]]
+genome_seqs <- import(genome)
+
+motifs <- query(MotifDb, "REST")
+names(motifs)
+motif <- motifs[["Mmusculus-HOCOMOCOv10-REST_MOUSE.H10MO.A"]]
+motif
+view_motifs(motifs[1:2])
+
+Biostrings::writeXStringSet(genome_seqs, "genome.fa")
+motif2 <- convert_motifs(motif, class="TFBSTools-PWMatrix")
+moi <- motifmatchr::matchMotifs(motif2, subject=peaks, genome=Rsamtools::FaFile("genome.fa"),
+                                out="positions")
+moi <- moi[[1]]
+hist(moi$score)
+
+```
+```{r}
+table(overlapsAny(peaks, moi))
+```
+
+Of the 3555 peaks, 870 (24.47%) contain a motif
+
+### Scanning the whole genome using motifmatchr
+
+```{r}
+motif_across_genome <- matchMotifs(motif2, subject=genome_seqs, out="positions")
+
+motif_across_genome <- motif_across_genome[[1]]
+names(motif_across_genome) <- names(genome_seqs)
+motif_across_genome <- as(motif_across_genome, "GRanges")
+head(motif_across_genome)
+seqlevelsStyle(motif_across_genome) <- "Ensembl"
+table(overlapsAny(motif_across_genome, peaks))
+```
+
+Of 601816 motif instances in the whole genome, 2253 (0.37%) of them overlap a peak
