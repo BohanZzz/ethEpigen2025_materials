@@ -1,0 +1,73 @@
+---
+title: "Assignment Week 07"
+author: "Bohan Zhang"
+date: "2025-04-07"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(AnnotationHub)
+  library(MotifDb)
+  library(memes)
+  library(universalmotif)
+  library(ensembldb)
+  library(ggplot2)
+})
+ah <- AnnotationHub(localHub=TRUE)
+ensdb <- ah[["AH89211"]] # mouse ensembldb object
+```
+
+Now we need to create tracks. 
+
+```{r}
+bam <- "atac.chr19.bam"
+# create the track of nucleosome-free fragments:
+bam2bw(bam, output_bw = "NF_cuts.bw", paired=TRUE, binWidth=1L, type="ends", minFragLength=30, 
+       maxFragLength=120, trim=4L, extend=3L, forceSeqlevelsStyle = "Ensembl")
+# create the track of nucleosome-containing fragments:
+bam2bw(bam, output_bw = "Nuc_centers.bw", paired=TRUE, binWidth=5L, minFragLength=140, trim=4L,
+       maxFragLength=220, type="center", extend=10L, forceSeqlevelsStyle = "Ensembl")
+```
+
+Here I chose transcription factor FOXD3 and MAZ.
+
+```{r}
+genome <- ah[["AH68356"]]
+chr19 <- import(genome)["19"]
+
+# get FOXD3 motif
+motif_FOXD3 <- MotifDb::query(MotifDb, c("FOXD3","Mus"))[[1]]
+motif2_FOXD3 <- convert_motifs(motif_FOXD3, class="TFBSTools-PFMatrix")
+moi_FOXD3 <- motifmatchr::matchMotifs(motif2_FOXD3, chr19, out="positions", p.cutoff=1e-5)[[1]]
+moi_FOXD3 <- as(setNames(moi_FOXD3,names(chr19)), "GRanges")
+
+#get MAZ motif
+motif_MAZ <- MotifDb::query(MotifDb, c("MAZ","Mus"))[[1]]
+motif2_MAZ <- convert_motifs(motif_MAZ, class="TFBSTools-PFMatrix")
+moi_MAZ <- motifmatchr::matchMotifs(motif2_MAZ, chr19, out="positions", p.cutoff=1e-5)[[1]]
+moi_MAZ <- as(setNames(moi_MAZ,names(chr19)), "GRanges")
+
+```
+
+## Plot
+
+```{r, fig.width=8, fig.height=4}
+tracks <- list.files(pattern="bw$")
+
+sm_FOXD3 <- signal2Matrix(tracks, moi_FOXD3, w=5L, extend=300)
+#plotEnrichedHeatmaps(sm_FOXD3, trim=0.95, multiScale = TRUE, axis_name = "0")
+d_FOXD3 <- meltSignals(sm_FOXD3[,c("NF_cuts", "Nuc_centers")])
+ggplot(d_FOXD3, aes(position, mean, colour=sample)) + geom_line(size=1.2)+
+  labs(title = "FOXD3")
+
+sm_MAZ <- signal2Matrix(tracks, moi_MAZ, w=5L, extend=300)
+#plotEnrichedHeatmaps(sm_MAZ, trim=0.95, multiScale = TRUE, axis_name = "0")
+d_MAZ <- meltSignals(sm_MAZ[,c("NF_cuts", "Nuc_centers")])
+ggplot(d_MAZ, aes(position, mean, colour=sample)) + geom_line(size=1.2)+
+  labs(title = "MAZ")
+```
+
+
+
