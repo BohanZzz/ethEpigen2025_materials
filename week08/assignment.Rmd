@@ -1,0 +1,137 @@
+---
+title: "Assignment Week 08"
+author: "Bohan Zhang"
+date: "2025-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(motifmatchr)
+  library(MotifDb)
+  library(universalmotif)
+  library(ggplot2)
+  library(SummarizedExperiment) # data structure
+  library(sechm) # for plotting heatmaps from a SummrizedExperiment
+  library(BiocParallel) # for multithreading
+  library(chromVAR) # for motif accessibility estimation
+  library(limma) # for statistical analysis
+})
+
+# to control multithreading, unix users can use:
+register(MulticoreParam(4))
+```
+
+## Prepare the data
+
+#### Download the peakCounts data
+
+```{r}
+options(timeout=6000)
+download.file("https://ethz-ins.org/content/mouse_mm38_hippocampus.peakCounts.SE.rds", "atac_peak.rds")
+se <- readRDS("atac_peak.rds")
+se
+colData(se)$condition <- sub("\\_.*", "",colnames(se))
+colData(se)$sex <- sub("^[^_]+_([^_]+)_.*$", "\\1", colnames(se))
+row.names(se) <- as.character(granges(se))
+head(assay(se, "counts"))
+```
+
+#### Get the genome of Mmu from week 06:
+
+```{r}
+genome <- Rsamtools::FaFile("/mnt/gapp/work/bohan/bioinfo/Week06/genome.fa")
+```
+
+#### Get the motifs
+
+```{r}
+motifs <- query(MotifDb, c("HOCOMOCOv10", "Mmusculus"))
+# convert to a format motifmatchr can use, and use the gene symbols as names
+motifs <- do.call(TFBSTools::PWMatrixList, setNames(
+           universalmotif::convert_motifs(motifs, class="TFBSTools-PWMatrix"),
+           mcols(motifs)$geneSymbol))
+motifs
+```
+
+## Perform chromVAR analysis
+
+```{r}
+se <- chromVAR::addGCBias(se, genome=genome)
+head(rowData(se))
+hist(rowData(se)$bias)
+```
+
+we can see most of the region have 50%GC, but we also have a little tail at left.
+
+```{r}
+summary(rowData(se)$bias)
+```
+
+Here we can see in GCbias result there are NAs. This will cause error in next step. so we need to filter it out now.
+
+```{r}
+se <- se[!is.na(rowRanges(se)$bias), ]
+summary(rowData(se)$bias)
+```
+```{r}
+moi <- motifmatchr::matchMotifs(motifs, subject=se, genome=genome) 
+head(assay(moi))
+set.seed(1234)
+# for each peak, we identify similar peaks as background
+bg <- chromVAR::getBackgroundPeaks(se, niterations=500)
+dev <- chromVAR::computeDeviations(object = se, annotations=moi, background_peaks=bg)
+dev
+```
+
+## Differential analysis
+
+```{r}
+dev$condition <- factor(dev$condition)
+dev$condition <- relevel(dev$condition, "Control")
+dev$sex <- factor(dev$sex)
+dev$sex <- relevel(dev$sex, "female")
+mm <- model.matrix(~condition+sex, data=as.data.frame(colData(dev)))
+mm
+```
+
+```{r}
+fit <- limma::eBayes(limma::lmFit(object = assays(dev)$z, design = mm))
+
+res_condition <- as.data.frame(limma::topTable(fit, coef="conditionFSS", number = Inf))
+head(res_condition)
+res_sex <- as.data.frame(limma::topTable(fit, coef="sexmale", number = Inf))
+head(res_sex)
+```
+
+Comparing stressed and control animals, we can see only the top 3 motifs have the reasonable Padj for significance. 
+
+Comparing male and female animals, we choose the top 6 motifs to report. 
+
+#### Report for condition
+
+```{r}
+cat("top most significant motifs between conditions: ", res_condition$ID[1:3])
+metadata(dev)$anno_colors <- list(condition=c(Control="forestgreen", FSS="firebrick"), sex = c(female="darkorchid2", male="deepskyblue"))
+sechm::sechm(dev, features = res_condition$ID[1:3], assayName="z", top_annotation = c("condition", "sex"))
+```
+
+In this heatmap we can see: these three motifs all have higher accessibility in condition group than in control group. 
+
+ANDR: Androgen Receptor, engaged in neuroplasticity, memory, mood, and responses to stress. Some studies have found that androgens help enhance the brain's stress resistance. So when under pressure, the androgen and the receptor level may increase.
+
+GCR: Glucocorticoid Receptor, a key component of negative feedback regulation of the HPA axis. The stress response activates the HPA axis, and the rise in cortisol levels inhibits further activation of the hypothalamus and pituitary gland through the GCR. So when under pressure, GCR may have higher accessibility.
+
+PRGR: Progesterone Receptor, engaged in mood regulation, stress resistance and neuroprotection
+
+Also we can see in female FSS group, there is one sample act very differently from others. This may cause some bias or indicate that some animals act very differently from others when going through stress.
+
+#### Report for sex
+
+```{r}
+cat("top most significant motifs between sex: ", head(res_sex$ID))
+sechm::sechm(dev, features = head(res_sex$ID), assayName="z", top_annotation = c("condition", "sex"))
+```
+
+In this heatmap we can see these six motifs have higher accessibility score in female than male samples. Maybe it's because of the different hormone level between sex. 
