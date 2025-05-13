@@ -1,0 +1,132 @@
+---
+title: "Assignment Week 10"
+author: "Bohan Zhang"
+date: "2025-05-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(GenomicRanges)
+  library(epiwraps)
+  library(ggplot2)
+  library(rGREAT) # Gene Ontology enrichment among genomic regions
+})
+setwd("/mnt/gapp/work/bohan/bioinfo/Week10/assignment")
+```
+
+## Data Preparation
+
+```{r}
+download.file("https://ethz-ins.org/content/w10.assignment.zip", "w10_assignment.zip")
+unzip("w10_assignment.zip")
+list.files()
+```
+
+The data is for three TFs of the CREB family (all restricted to chr1, aligned against the hg38 genome)
+
+## Prepare the regions and the tracks
+
+```{r}
+tracks <- list.files(pattern="bw$")
+
+peaks <- list.files(pattern="bed$")
+# we first import the peaks
+peaks <- lapply(peaks, rtracklayer::import.bed)
+# we'll focus on the high-quality peaks
+peaks <- lapply(peaks, FUN=function(x) x[x$score>800])
+# we get the union of non-redundant regions
+regions <- reduce(unlist(GRangesList(peaks)))
+```
+
+## Plot
+
+```{r}
+ese <- signal2Matrix(tracks, regions, extend=2000)
+plotEnrichedHeatmaps(ese)
+```
+
+In this plot we can see that CREB1 has the strongest signal, while CREB3 and CREB3L1 also has some signal.
+
+#### Clustering
+
+```{r}
+set.seed(123)  # to ensure that it gives the same results everytime
+test <- clusterSignalMatrices(ese, k=2:10)  # for each of the k value, compute the cluster (k is the number of clusters)
+ggplot(test$varExplained, aes(k, varExplained)) + geom_line()
+
+```
+
+In this plot we can see that when k<8, there is a relatively deep slope when increasing k, while after k>8, there is only a slight increase of varExplained. So we choose k=8 to do the clusering.
+
+```{r}
+cl <- clusterSignalMatrices(ese, k=8) 
+table(cl)
+rowData(ese)$cluster <- cl
+head(rowData(ese))
+mycolors <- c("1"="red", "2"="blue", "3"="darkgreen", "4"="black", "5" = "orange", "6" = "skyblue", "7" = "purple", "8" = "pink")
+plotEnrichedHeatmaps(ese, row_split="cluster", mean_color=mycolors, colors=c("white","darkred"))
+
+```
+
+Clustering using relative signal instead:
+
+```{r}
+cl_relative <- clusterSignalMatrices(ese, k=8, scaleRows = TRUE)
+rowData(ese)$cluster <- cl_relative
+```
+
+here we can see a larger percentage of variance is explained by this cluser method (96% comparing to 81%). so we choose this one as the final method to clustering.
+
+```{r}
+d <- meltSignals(ese, splitBy=cl_relative)
+ggplot(d, aes(position, mean, colour=sample)) + geom_line() + facet_wrap(~split)
+plotEnrichedHeatmaps(ese, row_split = cl_relative, scale_rows = "global") #the signal will be scaled globally
+```
+
+From the plot we can see:
+
+* In cluster 1, Creb3 has a relatively higher signal than CREB1 and CREB3L1
+
+* In cluster 2, the three TFs all have signals. The level of signal decreases from Creb3 to Creb3L1, then to Creb1.
+
+* In cluster 3, Creb1 and Creb3 have the strongest and second strongest signal, while Creb3L1 has almost no signal
+
+* In cluster 4, the three TFs all have signals. The level of signal decreases from Creb3L1 to Creb3, then to Creb1.
+
+* In cluster 5 and 6, Creb3L1 and Creb1 have the strongest and second strongest signal, while Creb3 also has a peak (although not very strong comparing to the other two)
+
+* In cluster 7 and 6, Creb1 has a very strong signal and the other two have almost no signal
+
+#### GO Enrichment Analysis
+
+```{r}
+# we first split the regions by cluster:
+split_regions <- split(rowRanges(ese), rowData(ese)$cluster)
+lengths(split_regions)
+
+# firstly we choose cluster7. the GO term will describe mainly the function of Creb1 since in cluster7 only Creb1 has a strong signal
+res <- great(split_regions[["7"]], gene_sets="GO:BP", tss_source="hg38", 
+             background=regions, cores=2) # the background should be all the regions that pass the quality test
+bp <- getEnrichmentTables(res)
+head(bp)
+ggplot(head(bp,15), aes(fold_enrichment, reorder(description, p_adjust), 
+                        size=observed_region_hits, color=-log10(p_adjust))) + 
+  geom_point() + scale_color_viridis_c()
+```
+
+CREB1 is a phosphorylation-dependent transcription factor that stimulates transcription upon binding to the DNA cAMP response element (CRE). In our GO anaysis we can see CREB1 engages in nervous system develpment, neuron differentiation and generation of neurons, reflecting the important role of CREB1 in neuron development. Importantly, we don't see terms related to ER-stress or UPR-related ontologies (typical for CREB3/CREB3L1), which aligns with our observation that this region predominantly contains CREB1 rather than membrane-tethered CREB3 family members.
+
+```{r}
+#Secondly we try to test cluster1. this cluster is dominant by CREB3 
+res2 <- great(split_regions[["1"]], gene_sets="GO:BP", tss_source="hg38", 
+             background=regions, cores=2) # the background should be all the regions that pass the quality test
+bp2 <- getEnrichmentTables(res2)
+head(bp2)
+ggplot(head(bp2,15), aes(fold_enrichment, reorder(description, p_adjust), 
+                        size=observed_region_hits, color=-log10(p_adjust))) + 
+  geom_point() + scale_color_viridis_c()
+```
+
+Firstly we can see a lot of terms regarding response, such as response to chemical, response to biotic stimulus, response to exteral stimulus, signalling, cellular response to stimulus, ..., which aligns with the main function of these three TFs. Also we see some terms that are CREB3-specific, such as granulocyte chemotaxis, immune response,  leukocyte activation, ..., which shows the important role of CREB3 in immune system.
+
