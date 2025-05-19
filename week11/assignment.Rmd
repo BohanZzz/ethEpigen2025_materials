@@ -1,0 +1,92 @@
+---
+title: "Assignment Week 11"
+author: "Bohan Zhang"
+date: "2025-05-19"
+output: html_document
+---
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(ggplot2)
+  library(AnnotationHub)
+  library(ensembldb)
+  library(edgeR)
+  library(rtracklayer)
+  library(BiocParallel)
+  library(rGREAT)
+  library(bsseq)   # Class and tools to analyze bisulfite sequencing data at CpG-level
+  library(DMRcate) # Identification of differentially-methylated regions
+})
+setwd("/mnt/gapp/work/bohan/bioinfo/Week11")
+```
+
+## Data Preparation
+
+```{r}
+#download.file("https://github.com/ETHZ-INS/ethEpigen2025_materials/blob/main/week11/dmr.rds", "dmr.rds")
+dmr <- readRDS("dmr.rds")
+dmr <- dmr[!is.na(dmr$overlapping.genes),] #remove those without gene names
+dmr <- dmr[order(dmr$min_smoothed_fdr),]
+dmr_chr1 <- dmr[seqnames(dmr)=="chr1",]
+
+bs <- readRDS("ESC_astrocytes_BSseq.rds")
+# remove CpGs that have 0 coverage in some samples:
+bs <- bs[rowSums(assay(bs,"Cov")>0)==ncol(bs),]
+bs <- BSmooth(bs, BPPARAM=MulticoreParam(4, progress=TRUE))
+```
+
+## Heatmap of top20 DMRs on chr1
+
+```{r}
+top20 <- head(dmr_chr1, n = 20)  
+top20
+met_top20 <- bsseq::getMeth(bs, regions=top20, what="perRegion")
+colnames(met_top20) <- colnames(bs)
+rownames(met_top20) <- top20$overlapping.genes
+met_top20
+pheatmap(met_top20, name="top20 on chr1\nmethylation")
+```
+
+We can see a clear pattern that some genes have higher methylation level in ESC, while some genes have higher methylation level in astrocytes. Meanwhile, there is a duplicated gene (MAP7D1). The two DMRs are very close.
+
+## rGREAT analysis
+
+```{r}
+enrich <- submitGreatJob(
+  gr = dmr,
+  species = "hg19"
+)
+result <- getEnrichmentTables(enrich)
+head(result$`GO Molecular Function`, n = 10)
+head(result$`GO Biological Process`, n = 10)
+head(result$`GO Cellular Component`, n = 10)
+```
+
+What the enrichment analysis is testing: For each GO term, GREAT counts how many DMRs fall within the gene regulatory domain defined by that term; and the proportion of intervals in the entire background (here is the whole genome) that are associated with that term. Simply put, it tests whether DMR appears more frequently than randomly in the gene regulatory domain corresponding to the known functional annotations (GO term).
+
+The results (for each category, three terms are chosen to be interpreted): 
+
+For Molecular Function:
+
+* NFAT protein binding: NFAT (Nuclear Factor of Activated T-cells) is a type of calcium-sensitive transcription factor that is classic in immune cells but also has a regulatory role in the development and plasticity of the nervous system.
+
+* phospholipid-hydroperoxide glutathione peroxidase activity: An antioxidant enzyme that reduces lipid peroxides on membranes and protects cells from oxidative damage. Antioxidant defense is particularly important in astrocytes. Altered methylation in the relevant gene regions suggests epigenetic remodeling of the regulation of the GPx4 system or oxidative stress response in astrocytes.
+
+* 9-cis retinoic acid receptor activity: After binding to 9-cis retinoic acid, Retinoid X Receptor (RXR) heterodimerizes and regulates downstream gene expression, and is widely involved in development and differentiation. RXR signaling is an important component of nervous system development and glial cell function maintenance. DMR enrichment in its target gene regulatory region suggests that the retinoic acid pathway is involved in astrocyte directional differentiation.
+
+For Biological Process:
+
+* behavioral response to nicotine: Astrocytes express multiple nicotinic acetylcholine receptors; methylation changes in genes related to nicotine response during differentiation may affect the involvement of glial cells in toxicant response and neuroprotection.
+
+* regulation of glycolytic process by positive regulation of transcription from RNA polymerase II promoter: ESCs are more dependent on glycolysis, while astrocytes still have strong glycolytic capabilities in their mature state; changes in DMR methylation on the promoters of key enzyme genes (such as HK2 and PFK) indicate that the expression of glycolytic genes is finely regulated during differentiation.
+
+* regulation of cellular ketone metabolic process by regulation of transcription from RNA polymerase II promoter: During differentiation from ESC to astrocyte, energy metabolism may shift from being dominated by glycolysis to being more dependent on fatty acid and ketone body utilization; DMR occurs in the promoter region that controls the transcription of such metabolic genes, suggesting that ketone body metabolism is subject to epigenetic regulation.
+
+For Cellular Component (Basically they are broader terms):
+
+* Golgi lumen: Astrocytes synthesize and secrete a large amount of proteins that support neurons (such as neurotrophic factors and cytokines). The epigenetic regulation of Golgi function affects these secretory pathways.
+
+* MAML1–RBP-Jκ–ICN1 complex: Notch pathway plays a key role in neural development and glial cell differentiation
+
+* endoplasmic reticulum lumen: Astrocyte calcium signaling events (such as calcium waves) and the production of a large number of secretory proteins are inseparable from the function of ER. The distribution of DMRs in the regulatory regions of related genes may affect the expression level and functional status of ER-related proteins.
