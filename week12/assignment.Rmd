@@ -1,0 +1,123 @@
+---
+title: "Assignment Week 12"
+author: "Bohan Zhang"
+date: "2025-05-26"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages({
+  library(GenomicRanges)
+  library(AnnotationHub)
+  library(ensembldb)
+  library(InteractionSet)
+  library(ggplot2)
+})
+setwd("/mnt/gapp/work/bohan/bioinfo/Week12")
+```
+
+## Data Preparation 
+
+We chose p300 as in the practical during the course:
+
+```{r}
+# p300 peaks in A549 cells:
+peaks <- rtracklayer::import("p300.narrowPeak.gz")
+seqlevelsStyle(peaks) <- "ensembl"
+head(peaks)
+```
+
+Granges file from Salviato et al.(2021) for peaks with predicted distal targets
+
+```{r}
+enhancerTar <- readRDS("hg38.SalviatoDistalEnhancerTargets.GR.rds")
+seqlevelsStyle(enhancerTar) <- "ensembl"
+head(enhancerTar)
+```
+
+## Subset peaks and label distal targets of peaks
+
+```{r}
+# find the peaks that have distal target
+o <- findOverlaps(peaks, enhancerTar)
+head(o)
+# label the peaks with targets:
+mcols(peaks)[from(o),"target"] <- enhancerTar[to(o)]$target
+mcols(peaks)$target <- CharacterList(mcols(peaks)$target)
+# Only keep the peaks that are overlapped with the enhancers:
+peaks <- peaks[from(o), ]
+# look at the output
+peaks
+```
+
+## Find the nearest TSS for each peak
+
+```{r}
+# Firstly load the reference genome
+ah <- AnnotationHub()
+ensdb <- ah[["AH95744"]] # human ensembl 104 annotation
+genes <- genes(ensdb)
+# get all the TSS from the reference genome
+tss <- resize(genes, width = 1, fix = "start")
+
+# find the nearest TSS for each peak
+nearest_tss <- tss[nearest(peaks, tss)]
+peaks$nearest_tss_gene <- nearest_tss$gene_name
+peaks$tss_start <- start(nearest_tss)
+# Some of them doesn't have symbol ID. Remove them:
+peaks <- peaks[peaks$nearest_tss_gene!="",]
+head(peaks)
+```
+
+Some rows look exactly the same. We should remove them:
+
+```{r}
+peaks <- peaks[!duplicated(peaks)]
+head(peaks)
+```
+
+## Split the peaks into upstream or downstream of the predicted target:
+
+```{r}
+relative_pos <- start(peaks) - peaks$tss_start
+peaks$position <- ifelse(relative_pos < 0, "upstream", "downstream")
+head(peaks)
+```
+
+## Calculate the proportion that the predicted target is the closest gene:
+
+```{r}
+same_gene <- peaks$target == peaks$nearest_tss_gene
+upstream_prop <- mean(sapply(same_gene[peaks$position == "upstream"], any))
+downstream_prop <- mean(sapply(same_gene[peaks$position == "downstream"], any))
+
+print(paste0("The proportion of upstream set: ", sprintf("%.2f%%", upstream_prop * 100), 
+             ". The proportion of downstream set: ", sprintf("%.2f%%", downstream_prop * 100)))
+
+```
+
+## Plot the distribution of the distances between peaks and TSS of the predicted target genes
+
+```{r}
+# Calculate the absolute value of the distance
+distances <- abs(start(peaks) - peaks$tss_start)
+peaks$distance <- distances
+
+# Visualization
+ggplot(as.data.frame(peaks), aes(x=distance, fill=position)) +
+  geom_histogram(bins=50, alpha=0.6, position="identity") +
+  scale_x_log10() +
+  facet_wrap(~position) +
+  theme_minimal() +
+  labs(title="Distance from peak to predicted TSS",
+       x="log10(Distance)",
+       y="Count")
+```
+
+
+
+
+
+
+
+
